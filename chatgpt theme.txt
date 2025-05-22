@@ -1,0 +1,548 @@
+// ==UserScript==
+// @name         ChatGPT Custom Theme Panel (Right & Collapsible, Background Image Upload)
+// @version      4.1
+// @description  Custom neon theme panel with background image upload and strong UI styling applied to ChatGPT page
+// @match        https://chat.openai.com/*
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    // --- CSS styles ---
+    const styles = `
+        .custom-theme-toggle {
+            position: fixed;
+            top: 100px;
+            right: 0;
+            z-index: 10000;
+            width: 40px;
+            height: 40px;
+            background: #0ff;
+            color: #000;
+            border-radius: 10px 0 0 10px;
+            cursor: pointer;
+            box-shadow: 0 0 10px #0ff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            user-select: none;
+            transition: background 0.3s ease;
+        }
+        .custom-theme-toggle:hover {
+            background: #0cc;
+        }
+        .custom-theme-panel {
+            position: fixed;
+            top: 100px;
+            right: -340px;
+            z-index: 9999;
+            width: 320px;
+            max-height: 80vh;
+            background: rgba(0, 0, 0, 0.85);
+            border: 2px solid #0ff;
+            border-radius: 10px 0 0 10px;
+            padding: 10px 10px 20px 10px;
+            color: #fff;
+            font-family: 'Segoe UI', sans-serif;
+            box-shadow: 0 0 10px #0ff, 0 0 20px #0ff;
+            overflow-y: auto;
+            transition: right 0.4s ease;
+            user-select: text;
+        }
+        .custom-theme-panel.open {
+            right: 0;
+        }
+        .custom-theme-panel h3 {
+            margin: 10px 0 6px 0;
+            font-size: 16px;
+            color: #0ff;
+            text-shadow: 0 0 5px #0ff;
+        }
+        .custom-theme-panel label,
+        .custom-theme-panel select,
+        .custom-theme-panel input[type=range],
+        .custom-theme-panel button,
+        .custom-theme-panel input[type=file] {
+            display: block;
+            margin-bottom: 10px;
+            width: 100%;
+            background: #111;
+            border: 1px solid #0ff;
+            color: #0ff;
+            padding: 6px;
+            border-radius: 5px;
+            box-shadow: 0 0 5px #0ff;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        .custom-theme-panel input[type=checkbox] {
+            display: inline-block;
+            width: auto;
+            margin-right: 6px;
+            vertical-align: middle;
+            cursor: pointer;
+        }
+        #particleCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw !important;
+            height: 100vh !important;
+            background: transparent !important;
+            pointer-events: none !important;
+            z-index: 9998 !important;
+        }
+        .letter-colored {
+            text-shadow: 0 0 8px var(--neon-color);
+            color: var(--neon-color);
+        }
+    `;
+
+    // Inject styles into the page
+    const styleTag = document.createElement('style');
+    styleTag.textContent = styles;
+    document.head.appendChild(styleTag);
+
+    // --- HTML panel ---
+    const panelHTML = `
+        <div class="custom-theme-toggle" id="toggleThemePanel" title="Toggle Theme Panel">⚙️</div>
+        <div class="custom-theme-panel" id="themePanel" aria-hidden="true" role="region" aria-label="Theme settings panel">
+            <h3>Theme Options</h3>
+            <label>Neon Color
+                <select id="neonColor" aria-label="Select neon color">
+                    <option value="#0ff">Cyan</option>
+                    <option value="#f0f">Magenta</option>
+                    <option value="#0f0">Lime</option>
+                    <option value="#ff0">Yellow</option>
+                    <option value="#f00">Red</option>
+                </select>
+            </label>
+
+            <label>Upload Background Image
+                <input type="file" id="backgroundImageUpload" accept="image/*" aria-label="Upload background image">
+            </label>
+
+            <label>
+                <input type="checkbox" id="textColorToggle" aria-label="Toggle neon text color"> Neon Text Color
+            </label>
+
+            <h3>Effects</h3>
+            <label>Particle Amount
+                <input type="range" id="particleAmount" min="0" max="100" value="20" aria-label="Set particle amount">
+            </label>
+            <label>
+                <input type="checkbox" id="particleUseSecondaryColor" aria-label="Toggle secondary particle color"> Use Secondary Particle Color
+            </label>
+            <label>Secondary Particle Color
+                <select id="particleSecondaryColor" aria-label="Select secondary particle color">
+                    <option value="#f0f">Magenta</option>
+                    <option value="#0ff">Cyan</option>
+                    <option value="#0f0">Lime</option>
+                    <option value="#ff0">Yellow</option>
+                    <option value="#f00">Red</option>
+                    <option value="#fff">White</option>
+                </select>
+            </label>
+
+            <canvas id="particleCanvas" aria-label="Particle effect canvas"></canvas>
+
+            <h3>What to Theme</h3>
+            <label><input type="checkbox" id="affectMain" checked> Chat Area</label>
+            <label><input type="checkbox" id="affectSidebar" checked> Sidebar</label>
+            <label><input type="checkbox" id="affectHeader" checked> Header</label>
+
+            <h3>Global</h3>
+            <label><input type="checkbox" id="toggleAll" checked> Enable All</label>
+            <button id="clearBackground">Clear Background Image</button>
+        </div>
+    `;
+
+    // Append panel to body
+    const container = document.createElement("div");
+    container.innerHTML = panelHTML;
+    document.body.appendChild(container);
+
+    // --- State ---
+    const state = {
+        color: '#0ff',
+        backgroundImage: '',
+        textColor: false,
+        particles: 20,
+        particleUseSecondaryColor: false,
+        particleSecondaryColor: '#f0f',
+        affect: {
+            main: true,
+            sidebar: true,
+            header: true
+        },
+        enabled: true,
+        panelOpen: false,
+    };
+
+    // --- Elements ---
+    const themePanel = document.getElementById('themePanel');
+    const toggleBtn = document.getElementById('toggleThemePanel');
+    const particleCanvas = document.getElementById('particleCanvas');
+    const ctx = particleCanvas.getContext('2d');
+
+    // --- Neon text letter coloring ---
+    function colorizeTextNodes(node) {
+        if (node.nodeType === Node.TEXT_NODE) {
+            if (node.parentNode && node.parentNode.classList && node.parentNode.classList.contains('letter-colored')) {
+                return; // already wrapped
+            }
+            if (node.textContent.trim().length === 0) return; // skip empty
+
+            const frag = document.createDocumentFragment();
+            for (const char of node.textContent) {
+                const span = document.createElement('span');
+                span.textContent = char;
+                span.className = 'letter-colored';
+                span.style.setProperty('--neon-color', state.color);
+                frag.appendChild(span);
+            }
+            node.parentNode.replaceChild(frag, node);
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+            const skipTags = ['SCRIPT', 'STYLE', 'CANVAS', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'OPTION', 'LABEL'];
+            if (skipTags.includes(node.tagName)) return;
+
+            if (node.closest('#themePanel') || node.closest('#toggleThemePanel')) return;
+            if (node === particleCanvas) return;
+
+            [...node.childNodes].forEach(colorizeTextNodes);
+        }
+    }
+
+    function removeColorizedSpans(node) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            if (node.classList.contains('letter-colored')) {
+                const textNode = document.createTextNode(node.textContent);
+                node.parentNode.replaceChild(textNode, node);
+                return;
+            }
+            [...node.childNodes].forEach(removeColorizedSpans);
+        }
+    }
+
+    function toggleLetterColoring(enable) {
+        const root = document.body;
+        if (enable) {
+            if (!root.classList.contains('letter-color-active')) {
+                colorizeTextNodes(root);
+                root.classList.add('letter-color-active');
+            }
+        } else {
+            if (root.classList.contains('letter-color-active')) {
+                removeColorizedSpans(root);
+                root.classList.remove('letter-color-active');
+            }
+        }
+    }
+
+    // --- Panel toggle ---
+    function togglePanel() {
+        state.panelOpen = !state.panelOpen;
+        if (state.panelOpen) {
+            themePanel.classList.add('open');
+            themePanel.setAttribute('aria-hidden', 'false');
+        } else {
+            themePanel.classList.remove('open');
+            themePanel.setAttribute('aria-hidden', 'true');
+        }
+    }
+    toggleBtn.addEventListener('click', togglePanel);
+
+    // --- Apply theme ---
+    function applyTheme() {
+        if (!state.enabled) {
+            resetTheme();
+            return;
+        }
+
+        // Background image + overlay
+        if(state.backgroundImage){
+            document.body.style.backgroundImage = `url(${state.backgroundImage})`;
+            document.body.style.backgroundSize = 'cover';
+            document.body.style.backgroundPosition = 'center center';
+            document.body.style.backgroundRepeat = 'no-repeat';
+            document.body.style.position = 'relative';
+
+            if (!document.getElementById('bgOverlay')) {
+                const overlay = document.createElement('div');
+                overlay.id = 'bgOverlay';
+                Object.assign(overlay.style, {
+                    position: 'fixed',
+                    top: '0',
+                    left: '0',
+                    width: '100vw',
+                    height: '100vh',
+                    backgroundColor: 'rgba(0,0,0,0.6)',
+                    pointerEvents: 'none',
+                    zIndex: '9997'
+                });
+                document.body.appendChild(overlay);
+            }
+        } else {
+            document.body.style.backgroundImage = '';
+            const overlay = document.getElementById('bgOverlay');
+            if (overlay) overlay.remove();
+        }
+
+        // Neon color variables
+        document.documentElement.style.setProperty('--neon-color', state.color);
+
+        // Apply neon text color
+        if(state.textColor){
+            toggleLetterColoring(true);
+        } else {
+            toggleLetterColoring(false);
+        }
+
+        // Apply neon color to selected parts
+        const mainArea = document.querySelector('main');
+        const sidebar = document.querySelector('nav');
+        const header = document.querySelector('header');
+
+        if (state.affect.main && mainArea) {
+            mainArea.style.color = state.color;
+            mainArea.style.textShadow = `0 0 8px ${state.color}`;
+        } else if (mainArea) {
+            mainArea.style.color = '';
+            mainArea.style.textShadow = '';
+        }
+
+        if (state.affect.sidebar && sidebar) {
+            sidebar.style.color = state.color;
+            sidebar.style.textShadow = `0 0 8px ${state.color}`;
+        } else if (sidebar) {
+            sidebar.style.color = '';
+            sidebar.style.textShadow = '';
+        }
+
+        if (state.affect.header && header) {
+            header.style.color = state.color;
+            header.style.textShadow = `0 0 8px ${state.color}`;
+        } else if (header) {
+            header.style.color = '';
+            header.style.textShadow = '';
+        }
+    }
+
+    function resetTheme() {
+        // Reset styles
+        document.body.style.backgroundImage = '';
+        const overlay = document.getElementById('bgOverlay');
+        if (overlay) overlay.remove();
+
+        document.documentElement.style.removeProperty('--neon-color');
+
+        // Remove colored spans if any
+        toggleLetterColoring(false);
+
+        // Reset color and text-shadow for main elements
+        ['main', 'nav', 'header'].forEach(selector => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.style.color = '';
+                el.style.textShadow = '';
+            }
+        });
+
+        // Reset particle canvas
+        particleCanvas.style.display = 'none';
+        stopParticleAnimation();
+    }
+
+    // --- Background image upload ---
+    const bgUploadInput = document.getElementById('backgroundImageUpload');
+    bgUploadInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            state.backgroundImage = reader.result;
+            applyTheme();
+        };
+        reader.readAsDataURL(file);
+    });
+
+    // Clear background image button
+    document.getElementById('clearBackground').addEventListener('click', () => {
+        state.backgroundImage = '';
+        bgUploadInput.value = '';
+        applyTheme();
+    });
+
+    // --- Inputs event listeners ---
+    document.getElementById('neonColor').addEventListener('change', (e) => {
+        state.color = e.target.value;
+        applyTheme();
+    });
+
+    document.getElementById('textColorToggle').addEventListener('change', (e) => {
+        state.textColor = e.target.checked;
+        applyTheme();
+    });
+
+    document.getElementById('particleAmount').addEventListener('input', (e) => {
+        state.particles = parseInt(e.target.value, 10);
+        if(state.particles > 0){
+            startParticleAnimation();
+        } else {
+            stopParticleAnimation();
+        }
+    });
+
+    document.getElementById('particleUseSecondaryColor').addEventListener('change', (e) => {
+        state.particleUseSecondaryColor = e.target.checked;
+        drawParticles();
+    });
+
+    document.getElementById('particleSecondaryColor').addEventListener('change', (e) => {
+        state.particleSecondaryColor = e.target.value;
+        drawParticles();
+    });
+
+    document.getElementById('affectMain').addEventListener('change', (e) => {
+        state.affect.main = e.target.checked;
+        applyTheme();
+    });
+    document.getElementById('affectSidebar').addEventListener('change', (e) => {
+        state.affect.sidebar = e.target.checked;
+        applyTheme();
+    });
+    document.getElementById('affectHeader').addEventListener('change', (e) => {
+        state.affect.header = e.target.checked;
+        applyTheme();
+    });
+
+    document.getElementById('toggleAll').addEventListener('change', (e) => {
+        state.enabled = e.target.checked;
+        if(!state.enabled){
+            resetTheme();
+        } else {
+            applyTheme();
+        }
+    });
+
+    // --- Particle animation ---
+    let particles = [];
+    let animationId = null;
+
+    function createParticles() {
+        particles = [];
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        for (let i = 0; i < state.particles; i++) {
+            particles.push({
+                x: Math.random() * w,
+                y: Math.random() * h,
+                radius: Math.random() * 2 + 1,
+                vx: (Math.random() - 0.5) * 0.5,
+                vy: (Math.random() - 0.5) * 0.5,
+                color: state.color,
+                colorSecondary: state.particleSecondaryColor
+            });
+        }
+    }
+
+    function drawParticles() {
+        if (!particleCanvas) return;
+
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        particleCanvas.width = w;
+        particleCanvas.height = h;
+        ctx.clearRect(0, 0, w, h);
+
+        particles.forEach(p => {
+            ctx.beginPath();
+            ctx.fillStyle = p.color;
+            if(state.particleUseSecondaryColor){
+                // Alternate colors by index to secondary color
+                const idx = particles.indexOf(p);
+                ctx.fillStyle = (idx % 2 === 0) ? p.color : p.colorSecondary;
+            }
+            ctx.shadowColor = ctx.fillStyle;
+            ctx.shadowBlur = 8;
+            ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    }
+
+    function updateParticles() {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        particles.forEach(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+
+            if (p.x < 0 || p.x > w) p.vx = -p.vx;
+            if (p.y < 0 || p.y > h) p.vy = -p.vy;
+        });
+    }
+
+    function animateParticles() {
+        updateParticles();
+        drawParticles();
+        animationId = requestAnimationFrame(animateParticles);
+    }
+
+    function startParticleAnimation() {
+        particleCanvas.style.display = 'block';
+        createParticles();
+        if (!animationId) {
+            animateParticles();
+        }
+    }
+    function stopParticleAnimation() {
+        if (animationId) {
+            cancelAnimationFrame(animationId);
+            animationId = null;
+        }
+        if (particleCanvas) {
+            particleCanvas.style.display = 'none';
+            ctx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+        }
+    }
+
+    // --- Initialize ---
+    // Set initial values in inputs
+    document.getElementById('neonColor').value = state.color;
+    document.getElementById('textColorToggle').checked = state.textColor;
+    document.getElementById('particleAmount').value = state.particles;
+    document.getElementById('particleUseSecondaryColor').checked = state.particleUseSecondaryColor;
+    document.getElementById('particleSecondaryColor').value = state.particleSecondaryColor;
+    document.getElementById('affectMain').checked = state.affect.main;
+    document.getElementById('affectSidebar').checked = state.affect.sidebar;
+    document.getElementById('affectHeader').checked = state.affect.header;
+    document.getElementById('toggleAll').checked = state.enabled;
+
+    if(state.particles > 0){
+        startParticleAnimation();
+    } else {
+        stopParticleAnimation();
+    }
+
+    applyTheme();
+
+    // Optional: Close panel on outside click
+    document.addEventListener('click', (e) => {
+        if (!themePanel.contains(e.target) && e.target !== toggleBtn && state.panelOpen) {
+            togglePanel();
+        }
+    });
+
+    // Accessibility: Allow toggling panel by keyboard
+    toggleBtn.tabIndex = 0;
+    toggleBtn.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            togglePanel();
+        }
+    });
+
+})();
